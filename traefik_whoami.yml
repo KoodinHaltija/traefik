@@ -1,0 +1,124 @@
+# https://doc.traefik.io/traefik/getting-started/quick-start/
+# mika.nokka1@gmail.com 8.10.2020 Hämeenlinna
+#
+# Starting 
+# sudo docker-compose -f traefik_whoami.yml up -d reverse-proxy 
+# sudo docker-compose -f traefik_whoami.yml up -d whoami 
+# sudo docker-compose -f traefik_whoami.yml up -d dockerserver
+# sudo docker-compose -f traefik_whoami.yml up -d redis
+# or use provided makefile
+#
+# Generate basic password as MD5
+# htpasswd -bn admin catsayscat
+# if any $ in generated password hash, use $$ for correct escaping
+#
+# http://localhost:8088/api/rawdata to see Traefik's API rawdata
+# whoami.docker.localhost for whoami prompt (admin,catsayscat)
+# curl -H Host:whoami.docker.localhost http://127.0.0.1 for whoami prompt
+# See app.py code for alla available options
+#
+# Traefik dashboard (if insecure mode on ):
+# http://localhost:8088/dashboard/
+# Traefik dashboard
+# http://traefik.docker.localhost/dashboard/
+
+
+version: '3'
+
+networks:
+   nextweb: 
+     external: false
+  
+
+
+services:
+  reverse-proxy:
+    # The official v2 Traefik docker image
+    image: traefik:v2.3
+    # Enables the web UI and tells Traefik to listen to docker
+    # unsecure mode for dev in use
+    command:
+      #--api.insecure=true 
+      --providers.docker
+      --api.dashboard=true
+
+   
+    ports:
+      # The HTTP port
+      - "80:80"
+      # The Web UI (enabled by --api.insecure=true)
+      - "8088:8080"
+
+    volumes:
+      # So that Traefik can listen to the Docker events
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    labels:
+      #dashboad will ask password (admin,catsayscat)
+      - "traefik.http.routers.api.rule=Host(`traefik.docker.localhost`)"
+      - "traefik.http.routers.api.service=api@internal"
+      - "traefik.http.routers.api.middlewares=admin"
+      - "traefik.http.middlewares.admin.basicauth.users=admin:$$apr1$$Cn9kF416$$Seb7AIWovNR0XvTvLPK.41"
+    
+    networks:
+      - nextweb
+      
+  whoami:
+    # A container that exposes an API to show its IP address
+    image: traefik/whoami
+    labels:
+    # activate basic authorization for whoami (admin, catsayscat)
+    - "traefik.http.routers.whoami.middlewares=auth"
+    - "traefik.http.middlewares.auth.basicauth.users=admin:$$apr1$$Cn9kF416$$Seb7AIWovNR0XvTvLPK.41"
+    # hostname for whoami
+    - "traefik.http.routers.whoami.rule=Host(`whoami.docker.localhost`)"
+    networks:
+      - nextweb
+ 
+  redis:
+    image: redis:latest
+    volumes:
+      - /home/mika/tmp/redisdata:/data
+    ports:
+      - "6379:6379"
+    environment:
+     - REDIS_REPLICATION_MODE=master
+    networks:
+      - nextweb
+   
+  dockerserver:
+    # Python-Flask-usgi mini webserver (see app.py code, dockerfile and makefile)
+    image: dockerserver
+    ports:
+      - "9090:9090"
+    #expose:
+    #  - 9090
+    depends_on:
+      - redis
+      
+    volumes:
+      # So that Traefik can listen to the Docker events
+      - /home/mika/tmp:/tmp
+
+    # take env variables from shell is not working thus setting here manually
+    # keep sync with makefile
+    # setting these as env variables in running container
+    #environment:
+    #    - HOSTDIR=/home/mika/tmp
+    #    - CONTAINERDIR=/tmp
+    #    - MOUNTDIR=/home/mika/tmp:/tmp
+    #    - APPNAME=dockerserver
+    #    - SHELLLOGFILE=flask.log
+    #    - LOCAPORT=9090
+    
+    #use makefile generated env file to set env variables in running container 
+    env_file:
+    - envs.env   
+
+    
+    labels:
+    - "traefik.http.routers.dockerserver.rule=Host(`dockerserver.docker.localhost`) " 
+    
+    networks:
+      - nextweb
+    
